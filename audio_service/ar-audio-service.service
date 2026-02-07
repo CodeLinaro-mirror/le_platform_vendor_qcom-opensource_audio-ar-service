@@ -1,0 +1,29 @@
+##
+## Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+## SPDX-License-Identifier: BSD-3-Clause-Clear
+##
+
+[Unit]
+Description= AR Audio Service Daemon
+ConditionPathExists=/usr/lib/ar/
+Requires = systemd-modules-load.service sys-kernel-debug.mount vhost-user-aud.service
+After = systemd-modules-load.service sys-kernel-debug.mount vhost-user-aud.service awe-dsp.service
+DefaultDependencies=no
+Conflicts=shutdown.target
+Before=shutdown.target
+
+#TODO figure out what the variant is for AR on NORDY for now always run service
+[Service]
+LimitMSGQUEUE=infinity
+BusName=org.Qti.AgmService
+SystemdService=dbus-org.Qti.AgmService.service
+ExecCondition = /bin/sh -c "if [ \"$(/bin/cat /sys/kernel/debug/qcom_socinfo/adsp/variant)\" = \"nord.adsp.audio_arQ\" ]; then \
+    /bin/echo \"detecting ar, launching ar audio_service\" && exit 0; \
+else \
+    /bin/echo \"detecting non-ar, skip launching; adsp variant: \
+    $(/bin/cat /sys/kernel/debug/qcom_socinfo/adsp/variant)\" && exit 1; \
+fi"
+Type=dbus
+
+[Install]
+WantedBy=multi-user.target
