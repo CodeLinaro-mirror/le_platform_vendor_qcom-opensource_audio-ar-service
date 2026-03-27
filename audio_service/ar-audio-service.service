@@ -23,6 +23,14 @@ else \
     /bin/echo \"detecting non-ar, skip launching; adsp variant: \
     $(/bin/cat /sys/kernel/debug/qcom_socinfo/adsp/variant)\" && exit 1; \
 fi"
+ExecStart = /usr/bin/audio_service
+ExecStartPost=/bin/sh -c 'mount -o remount,rw / && \
+if ls /usr/lib/ar/*.so; then \
+    cp -f /usr/lib/ar/*.so /usr/lib/ && echo "Copied .so files"; \
+else \
+    echo "/usr/lib/ar/*.so files NOT available on fs..."; \
+fi && \
+mount -o remount,ro /'
 Type=dbus
 
 [Install]

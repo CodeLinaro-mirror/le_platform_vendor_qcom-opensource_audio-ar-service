@@ -52,7 +52,7 @@ static uint32_t ar_prm_alloc_packet(uint32_t payload_size, void **payload)
     struct ar_prm_header *prm_header = NULL;
     void *packet = NULL;
 
-    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "JOSH Enter, ar_prm_alloc_packet enter\n");
+    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "Enter, ar_prm_alloc_packet\n");
 
     packet = calloc(1,payload_size);
     if (!packet)
@@ -65,7 +65,7 @@ static uint32_t ar_prm_alloc_packet(uint32_t payload_size, void **payload)
     prm_header->error_code = 0;
 
     *payload = packet;
-    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "JOSH Exit, ar_prm_alloc_packet\n");
+    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "Exit, ar_prm_alloc_packet\n");
     return 0;
 }
 
