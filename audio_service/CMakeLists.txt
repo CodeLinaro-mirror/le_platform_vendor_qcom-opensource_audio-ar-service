@@ -29,6 +29,7 @@ add_executable(audio_service ${audio_service_SOURCE})
 target_link_libraries(audio_service PRIVATE pthread dl glib-2.0 rt)
 target_link_libraries(audio_service PRIVATE audio_log_util ${LIBS})
 target_link_libraries(audio_service PRIVATE agmserverwrapper ar_service_utils)
+target_link_libraries(audio_service PRIVATE AudioDeviceManager)
 target_link_libraries(audio_service PRIVATE glink_client pil-client ar_dev_plugin)
 target_link_libraries(audio_service PRIVATE systemd)
 

@@ -30,7 +30,8 @@
 #ifdef ENABLE_AUDIO_BACKEND
 #include "gsl_be.h"
 #endif
-
+extern int adm_init(const char* service_type);
+extern int adm_deinit(void);
 /*===Global definitions======*/
 #define AUDIO_BASE ""
 #define combpath(x,y) (x#y)
@@ -98,6 +99,9 @@ int audio_service_base_init(int flags, const char *lpass_config_path)
     } else {
         AUDIO_BASE_LOG(BASE_LOG_DEBUG, MODULE_AUDIO_SERVICE, "ar_dev_init succeeded.");
     }
+//6 Initialize Virtio Audio Device's Audio Device Manager
+    (void)adm_init("ar");
+    AUDIO_BASE_LOG(BASE_LOG_DEBUG, MODULE_AUDIO_SERVICE, "adm_init() done for Virtio Audio Device");
     AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "Pre-init complete");
 
 exit:
@@ -107,7 +111,7 @@ exit:
 int audio_service_base_deinit(void)
 {
     int32_t rc = 0;
-
+    (void)adm_deinit();
     (void)ipc_agm_deinit();
     if (rc) {
         AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "failure in audio_service_base_deinit");
