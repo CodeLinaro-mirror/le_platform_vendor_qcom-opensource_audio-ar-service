@@ -13,6 +13,7 @@
 
 #ifndef _CORE_INIT_H_
 #define _CORE_INIT_H_
+#include <stdint.h>
 #include "audio_log_util.h"
 
 /* Make a given function visible only to project*/
@@ -31,6 +32,11 @@
  *          Initialize DAL, Slimbus, SMEM/SMD Lite, Diag, NPA
  * */
 int HIDDEN_ATTR audio_service_base_init(int flags, const char *lpass_config_path);
+
+/* @brief : Store device subgraph ID and key-value parsed from command-line args.
+ *          Must be called before audio_service_base_init.
+ * */
+void HIDDEN_ATTR audio_service_set_sg_params(uint32_t device_id, uint32_t device_kv);
 
 /* @brief : De-initializes all the core components for shutdown routine.
  *

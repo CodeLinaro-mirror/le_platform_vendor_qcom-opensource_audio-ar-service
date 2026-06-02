@@ -60,8 +60,9 @@ else \
 fi"
 
 # Step 4: Launch the AR audio service binary.
-ExecStart = /usr/bin/audio_service
-
+ExecStart=/usr/bin/audio_service 102 0xA2000017
+ExecStartPost=/usr/bin/a2bplus_app a2b1.0 /etc/audio_a2bplus_cfg/quat.cfg
+ExecStartPost=/usr/bin/a2bplus_app a2b2.0 /etc/audio_a2bplus_cfg/hsd_2node.cfg
 Type=dbus
 Slice=pvm.slice
 

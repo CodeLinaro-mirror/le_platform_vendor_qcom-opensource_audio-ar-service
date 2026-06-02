@@ -18,6 +18,7 @@ include_directories(${audio_service_includes})
 set(audio_service_SOURCE
     src/audio_stubs.c
     src/coreinit.c
+    src/device_sg.c
     src/main.c)
 
 if("${ENABLE_TARGET}" STREQUAL "sa8775" OR "${ENABLE_TARGET}" STREQUAL "sa8797")
@@ -32,6 +33,8 @@ target_link_libraries(audio_service PRIVATE agmserverwrapper ar_service_utils)
 target_link_libraries(audio_service PRIVATE AudioDeviceManager)
 target_link_libraries(audio_service PRIVATE glink_client pil-client ar_dev_plugin)
 target_link_libraries(audio_service PRIVATE systemd)
+target_link_libraries(audio_service PRIVATE agm)
+target_link_libraries(audio_service PRIVATE tinyalsa agmmixer)
 
 ## Needed when below libs are statically linked
 target_link_libraries(audio_service PRIVATE ar-gsl)
