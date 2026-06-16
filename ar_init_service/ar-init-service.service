@@ -4,9 +4,10 @@
 ##
 
 [Unit]
-Description=AR init tasks after ar-audio-service.service being active and running
+Description=AR init tasks after ar-audio-service.service launches.
 Requires=ar-audio-service.service
 After=ar-audio-service.service
+PartOf=ar-audio-service.service
 DefaultDependencies=no
 Conflicts=shutdown.target
 Before=shutdown.target
@@ -14,6 +15,13 @@ StartLimitBurst=5
 
 [Service]
 LimitMSGQUEUE=infinity
+
+ExecCondition = /bin/sh -c "if [ \"$(/bin/cat /sys/kernel/debug/qcom_socinfo/adsp/variant)\" = \"nord.adsp.audio_arQ\" ]; then \
+    /bin/echo \"detecting ar, launching ar-init-service\" && exit 0; \
+else \
+    /bin/echo \"detecting non-ar, skip launching; adsp variant: \
+    $(/bin/cat /sys/kernel/debug/qcom_socinfo/adsp/variant)\" && exit 1; \
+fi"
 
 ExecStart=/usr/bin/ar_init_service 102 0xA2000017
 ExecStartPost=/usr/bin/a2bplus_app a2b1.0 /etc/audio_a2bplus_cfg/quat.cfg
