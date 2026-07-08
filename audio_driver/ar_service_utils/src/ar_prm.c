@@ -16,6 +16,122 @@
 #include "audio_hw_clk_api.h"
 #include <errno.h>
 #include "audio_log_util.h"
+#include <ctype.h>
+
+#define AR_PRM_MCLK_CFG_FILE  "/etc/audio_oem_cfg/ar_prm_mclk.cfg"
+#define AR_PRM_MCLK_MAX_NUM   8
+#define CLOCK_FREQS_DEFAULT   12288000
+
+#define AR_PRM_GET_SUBKEY_VAL(s, skey, v)       \
+    {                                           \
+        v = NULL;                               \
+        int sklen = strlen(skey);               \
+        if (strncmp(s, skey, sklen) == 0) {     \
+            if (s[sklen] == ':' || s[sklen] == '=') \
+                v = &s[sklen + 1];              \
+        }                                       \
+    }
+
+#define AR_PRM_GET_VAL_INT(sv, v, num)          \
+    {                                           \
+        if (sv != NULL) {                       \
+            while (sv[0] != '\0') {             \
+                if (isdigit(*sv)) {             \
+                    int val = strtol(sv, &sv, 10); \
+                    *v++ = val;                 \
+                    ++num;                      \
+                } else {                        \
+                    sv++;                       \
+                }                               \
+            }                                   \
+        }                                       \
+    }
+
+struct ar_prm_mclk_cfg {
+    int      num_clks;
+    uint32_t clock_ids[AR_PRM_MCLK_MAX_NUM];
+    uint32_t clock_freqs[AR_PRM_MCLK_MAX_NUM];
+    uint32_t clock_attris[AR_PRM_MCLK_MAX_NUM];
+    uint32_t clock_roots[AR_PRM_MCLK_MAX_NUM];
+};
+
+static int ar_prm_load_mclk_cfg(struct ar_prm_mclk_cfg *cfg)
+{
+    int id_num = 0;
+    int freq_num = 0;
+    int attri_num = 0;
+    int root_num = 0;
+    bool in_section = false;
+    FILE *fp = NULL;
+    char buffer[64];
+
+    memset(cfg, 0, sizeof(*cfg));
+
+    fp = fopen(AR_PRM_MCLK_CFG_FILE, "r");
+    if (!fp) {
+        AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE,
+            "ar_prm_mclk.cfg not found, skip mclk");
+        return -1;
+    }
+
+    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+        char *sv = NULL;
+        /* only process mclk_ctrl section in cfg file */
+        if (strncmp(buffer, "[mclk_ctrl]", 11) == 0) {
+            in_section = true;
+            continue;
+        }
+        if (buffer[0] == '[') {
+            in_section = false;
+            continue;
+        }
+        if (!in_section)
+            continue;
+
+        AR_PRM_GET_SUBKEY_VAL(buffer, "clock_id", sv);
+        if (sv) {
+            uint32_t *v = cfg->clock_ids;
+            AR_PRM_GET_VAL_INT(sv, v, id_num);
+            continue;
+        }
+
+        AR_PRM_GET_SUBKEY_VAL(buffer, "clock_freq", sv);
+        if (sv) {
+            uint32_t *v = cfg->clock_freqs;
+            AR_PRM_GET_VAL_INT(sv, v, freq_num);
+            continue;
+        }
+
+        AR_PRM_GET_SUBKEY_VAL(buffer, "clock_attri", sv);
+        if (sv) {
+            uint32_t *v = cfg->clock_attris;
+            AR_PRM_GET_VAL_INT(sv, v, attri_num);
+            continue;
+        }
+
+        AR_PRM_GET_SUBKEY_VAL(buffer, "clock_root", sv);
+        if (sv) {
+            uint32_t *v = cfg->clock_roots;
+            AR_PRM_GET_VAL_INT(sv, v, root_num);
+            continue;
+        }
+    }
+
+    fclose(fp);
+    cfg->num_clks = id_num;
+
+    /*Use clk_id as reference. If any fields are missing in the config file, fill them with default values.*/
+    for (int i = 0; i < id_num; i++) {
+        if (i >= freq_num)
+            cfg->clock_freqs[i]  = CLOCK_FREQS_DEFAULT;
+        if (i >= attri_num)
+            cfg->clock_attris[i] = CLOCK_ATTRIBUTE_COUPLE_NO;
+        if (i >= root_num)
+            cfg->clock_roots[i]  = CLOCK_ROOT_DEFAULT;
+    }
+
+    return cfg->num_clks;
+}
 
 static void ar_mem_free(void *p)
 {
@@ -226,52 +342,50 @@ int32_t ar_prm_set_default_mclk()
 {
     uint32_t rc = 0;
     struct ar_clk_config* clk_config = NULL;
-    int32_t c = 0;
-    uint32_t clock_id = CLOCK_ID_MCLK_1;
-    uint32_t clock_freq = 12288000;
-    uint32_t clock_root = CLOCK_ROOT_DEFAULT;
-    uint32_t clock_attr = CLOCK_ATTRIBUTE_COUPLE_NO;
-    uint32_t mux_index = 0;
-    uint32_t m_value = 0;
-    uint32_t n_value = 0;
-    uint32_t d_value = 0;
-    int32_t opt_cnt = 0;
-    uint32_t session_handle = 0;
+    struct ar_prm_mclk_cfg mclk_cfg;
+    int num_clks;
+
     AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "Enter: ar_prm_set_default_mclk");
 
-    clk_config = calloc(1, sizeof(struct ar_clk_config) + 1 *sizeof(struct ar_clk_config_entry));
-    if(NULL == clk_config)
-    {
+    num_clks = ar_prm_load_mclk_cfg(&mclk_cfg);
+    if (num_clks <= 0) {
+        AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "no mclk configured, skip enable");
+        rc = -EINVAL;
+        goto end;
+    }
+
+    clk_config = calloc(1, sizeof(struct ar_clk_config) + num_clks * sizeof(struct ar_clk_config_entry));
+    if (clk_config == NULL) {
         AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "Failed to allocate memory for clock config");
         rc = -ENOMEM;
         goto end;
     }
 
-    clk_config->num_clks = 1;
-    clk_config->entries[0].id      = clock_id;
-    clk_config->entries[0].freq    = clock_freq;
-    clk_config->entries[0].root    = clock_root;
-    clk_config->entries[0].attri   = clock_attr;
-    clk_config->entries[0].mux_index   = mux_index;
-    clk_config->entries[0].divider_2x  = 0;
-    clk_config->entries[0].counter_m_value = m_value;
-    clk_config->entries[0].counter_n_value = n_value;
-    clk_config->entries[0].d_value = d_value;
+    clk_config->num_clks = num_clks;
+    for (int i = 0; i < num_clks; i++) {
+        clk_config->entries[i].id              = mclk_cfg.clock_ids[i];
+        clk_config->entries[i].freq            = mclk_cfg.clock_freqs[i];
+        clk_config->entries[i].root            = mclk_cfg.clock_roots[i];
+        clk_config->entries[i].attri           = mclk_cfg.clock_attris[i];
+        clk_config->entries[i].mux_index       = 0;
+        clk_config->entries[i].divider_2x      = 0;
+        clk_config->entries[i].counter_m_value = 0;
+        clk_config->entries[i].counter_n_value = 0;
+        clk_config->entries[i].d_value         = 0;
+    }
 
     rc = ar_prm_clk_enable_v2(clk_config);
-    //rc = ar_prm_clk_enable(clk_config);
-    if(rc)
-    {
+    if (rc) {
         AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "Failed to set default mclk");
         rc = -EINVAL;
         goto end;
     }
 
 end:
-   if(clk_config)
+    if(clk_config)
         ar_mem_free(clk_config);
 
-    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE,"Exit: ar_prm_set_default_mclk");
+    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "Exit: ar_prm_set_default_mclk");
     return rc;
 }
 
@@ -279,29 +393,40 @@ int32_t ar_prm_release_default_mclk()
 {
     uint32_t rc = 0;
     struct ar_prm_clk_disable* clk_release = NULL;
-    int32_t c = 0;
-    uint32_t clock_id = 0;
-    int32_t opt_cnt = 0;
-    uint32_t session_handle = 0;
+    struct ar_prm_mclk_cfg mclk_cfg;
+    int num_clks;
 
-    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE,"Enter: ar_prm_release_default_mclk");
-    clk_release = ar_mem_zalloc(sizeof(struct ar_prm_clk_disable) + 1 *sizeof(uint32_t));
+    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "Enter: ar_prm_release_default_mclk");
 
-    clk_release->num_clks = 1;
-    clk_release->clk_ids[0] = clock_id;
+    num_clks = ar_prm_load_mclk_cfg(&mclk_cfg);
+    if (num_clks <= 0) {
+        AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "no mclk configured, skip release");
+        rc = -EINVAL;
+        goto end;
+    }
+
+    clk_release = ar_mem_zalloc(sizeof(struct ar_prm_clk_disable) + num_clks * sizeof(uint32_t));
+    if (clk_release == NULL) {
+        AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "Failed to allocate memory for clk_release");
+        rc = -ENOMEM;
+        goto end;
+    }
+
+    clk_release->num_clks = num_clks;
+    for (int i = 0; i < num_clks; i++)
+        clk_release->clk_ids[i] = mclk_cfg.clock_ids[i];
 
     rc = ar_prm_clk_disable_v2(clk_release);
-    if(rc)
-    {
+    if (rc) {
         AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "Failed to release default mclk");
         rc = -EINVAL;
         goto end;
     }
 
 end:
-    if(clk_release)
+    if (clk_release)
         ar_mem_free(clk_release);
 
-    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE,"Exit: ar_prm_release_default_mclk");
+    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "Exit: ar_prm_release_default_mclk");
     return rc;
 }
