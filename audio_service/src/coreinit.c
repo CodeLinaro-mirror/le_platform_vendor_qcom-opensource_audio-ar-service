@@ -34,6 +34,23 @@
 #endif
 extern int adm_init(const char* service_type);
 extern int adm_deinit(void);
+extern int32_t ar_dev_init(void);
+
+static void *ar_dev_init_thread(void *arg)
+{
+    int32_t rc = 0;
+
+    pthread_setname_np(pthread_self(), "ar_dev_init");
+
+    AUDIO_BASE_LOG(BASE_LOG_DEBUG, MODULE_AUDIO_SERVICE, "ar_dev_init starts");
+
+    rc = ar_dev_init();
+
+    if(rc != 0)
+       AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "ar_dev_init failed with error");
+
+    return NULL;
+}
 /*===Global definitions======*/
 #define AUDIO_BASE ""
 #define combpath(x,y) (x#y)
@@ -62,21 +79,6 @@ void audio_service_set_sg_params(uint32_t device_id, uint32_t device_kv)
     s_device_sg_configured = true;
 }
 
-
-/* @brief : Initializes all the core components before the audio driver can
- *          be loaded into the process
- *
- * @brief This function initializes
- *  1. glink; 2. shared mem w/ dsp; 3. agm dbus ipc;
- *  3.1 AGM SSR callback; 3.2 D-Bus SSR broadcast;
- *  4. mclk; 4.1 sleep (i2c settle); 5. HW codec device config;
- *  6. Virtio Audio Device Manager; 7. device subgraph;
- *
- * @param[in] flags - flags to be passed to the audio service
- * @param[in] lpass_config_path - path to the lpass config file
- *
- * @return int - 0 on success, -1 on failure
- */
 /*
  * audio_service_ssr_cb - called by AGM when the audio subsystem goes down
  * or comes back up after a Subsystem Restart (SSR).
@@ -134,27 +136,44 @@ static void audio_service_ssr_cb(enum agm_ssr_event_type event_type,
     }
 }
 
+/* @brief : Initializes all the core components before the audio driver can
+ *          be loaded into the process
+ *
+ * @brief This function initializes
+ *  1. glink; 2. shared mem w/ dsp; 3. agm dbus ipc;
+ *  3.1 AGM SSR callback; 3.2 D-Bus SSR broadcast;
+ *  4. mclk; 4.1 sleep (i2c settle); 5. HW codec device config;
+ *  6. Virtio Audio Device Manager; 7. device subgraph;
+ *
+ * @param[in] flags - flags to be passed to the audio service
+ * @param[in] lpass_config_path - path to the lpass config file
+ *
+ * @return int - 0 on success, -1 on failure
+ */
 int audio_service_base_init(int flags, const char *lpass_config_path)
 {
     pthread_attr_t attr;
-    pthread_t cdc_tid;
-    pthread_t fastrpc_be_tid;
-    pthread_t audio_postinit_tid;
+    pthread_t ar_dev_tid;
     int32_t rc = 0;
+
+    rc = pthread_attr_init(&attr);
+    if (rc != 0) {
+        AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE,
+                       "pthread_attr_init failed: %d", rc);
+        return rc;
+    }
 
 //1 glink
     (void)glink_init();
-    AUDIO_BASE_LOG(BASE_LOG_DEBUG, MODULE_AUDIO_SERVICE, "glink_init done.");
+    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "glink_init done.");
 //2 shmem
     (void)xport_smem_init(init_cfg, sizeof(init_cfg)/sizeof(init_cfg[0]));
-    AUDIO_BASE_LOG(BASE_LOG_DEBUG, MODULE_AUDIO_SERVICE, "xport_smem_init done.");
+    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "xport_smem_init done.");
 //3 agm dbus ipc
     rc = ipc_agm_init();
     if (rc != 0) {
         AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "AGM init failed.");
         goto exit;
-    } else {
-        AUDIO_BASE_LOG(BASE_LOG_DEBUG, MODULE_AUDIO_SERVICE, "ipc_agm_init succeeded.");
     }
 /*
  * 3.1 Register the audio service's own SSR callback directly with AGM.
@@ -184,26 +203,27 @@ int audio_service_base_init(int flags, const char *lpass_config_path)
         AUDIO_BASE_LOG(BASE_LOG_DEBUG, MODULE_AUDIO_SERVICE,
                        "ipc_agm_ssr_register succeeded.");
     }
-//4 mclk
+//4 mclk — required before ar_dev_init; abort if MCLK cannot be configured
     rc = ar_prm_set_default_mclk();
     if (rc != 0) {
         AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "ar_prm_set_default_mclk failed.");
-    }
-//4.1 sleep for successful i2c read/write.
-    sleep(5);
-//5 ar_dev_init
-    rc = ar_dev_init();
-    if (rc != 0) {
-        AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "ar_dev_init failed.");
         goto exit;
-    } else {
-        AUDIO_BASE_LOG(BASE_LOG_DEBUG, MODULE_AUDIO_SERVICE, "ar_dev_init succeeded.");
+    }
+    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "ar_prm_set_default_mclk succeeded.");
+//5 ar_dev_init — run in thread so MCLK settling overlaps with adm_init
+    if (0 != pthread_create(&ar_dev_tid, &attr, (void*)ar_dev_init_thread, NULL)) {
+        AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "failure creating ar_dev_init thread");
+        goto exit;
     }
 
 //6 Initialize Virtio Audio Device's Audio Device Manager
     (void)adm_init("ar");
+    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "adm_init() done for Virtio Audio Device");
 
-    AUDIO_BASE_LOG(BASE_LOG_DEBUG, MODULE_AUDIO_SERVICE, "adm_init() done for Virtio Audio Device");
+    // join to ensure DAC is ready before service is declared ready
+    pthread_join(ar_dev_tid, NULL);
+    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "Pre-init complete");
+
 //7 device subgraph init
     if (s_device_sg_configured) {
         device_sg_init((int)s_dev_id, s_device_kv);
@@ -211,7 +231,12 @@ int audio_service_base_init(int flags, const char *lpass_config_path)
 
     pthread_setname_np(pthread_self(), "ar_audio_main");
 exit:
-    return 0;
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
+        AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE,
+                       "Exit from audio_service_base_init with error code %d", rc);
+    }
+    return rc;
 }
 
 int audio_service_base_deinit(void)
