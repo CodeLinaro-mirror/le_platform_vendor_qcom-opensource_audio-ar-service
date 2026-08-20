@@ -63,6 +63,7 @@ fi"
 ExecStart = /usr/bin/audio_service
 
 Type=dbus
+Slice=pvm.slice
 
 [Install]
 WantedBy=multi-user.target
