@@ -104,6 +104,7 @@ int audio_service_base_init(int flags, const char *lpass_config_path)
     AUDIO_BASE_LOG(BASE_LOG_DEBUG, MODULE_AUDIO_SERVICE, "adm_init() done for Virtio Audio Device");
     AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "Pre-init complete");
 
+    pthread_setname_np(pthread_self(), "ar_audio_main");
 exit:
     return 0;
 }
