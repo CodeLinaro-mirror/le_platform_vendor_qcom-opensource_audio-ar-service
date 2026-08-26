@@ -4,13 +4,16 @@
 ##
 
 [Unit]
-Description= AR Audio Service Daemon
-ConditionPathExists=/usr/lib/ar/
-Requires = systemd-modules-load.service sys-kernel-debug.mount vhost-user-aud.service
-After = systemd-modules-load.service sys-kernel-debug.mount vhost-user-aud.service awe-dsp.service
+Description=AR Audio Service Daemon
+Requires=systemd-modules-load.service sys-kernel-debug.mount vhost-user-aud.service
+After=systemd-modules-load.service sys-kernel-debug.mount vhost-user-aud.service awe-dsp.service
 DefaultDependencies=no
 Conflicts=shutdown.target
 Before=shutdown.target
+
+ConditionPathExists=/usr/lib/ar/
+ConditionPathExists=/etc/gen5/
+ConditionPathExists=/etc/acdbdata/
 
 #TODO figure out what the variant is for AR on NORDY for now always run service
 [Service]
@@ -18,48 +21,93 @@ LimitMSGQUEUE=infinity
 BusName=org.Qti.AgmService
 SystemdService=dbus-org.Qti.AgmService.service
 
-# Step 1: Select ACDB calibration files based on SoC machine string before audio_service starts.
-# /sys/devices/soc0/machine contains e.g. "QAM8797P" or "QAM8787P".
-# Substring "8797" -> sa8797p (Nord), substring "8787" -> sa8787 (Seca).
-# Files are staged under /etc/gen5/<soc>/ at image build time and
-# copied to /etc/acdbdata/ here so that AGM (graph_init) loads the correct set.
-ExecStartPre=/bin/sh -c 'mount -o remount,rw / && \
+ExecCondition=/bin/sh -c '\
+VARIANT=$(cat /sys/kernel/debug/qcom_socinfo/adsp/variant); \
+if [ "$VARIANT" = "nord.adsp.audio_arQ" ]; then \
+    echo "detecting ar, launching ar audio_service" && exit 0; \
+else \
+    echo "detecting non-ar, skip launching; adsp variant: $VARIANT" && exit 1; \
+fi'
+
+ExecStartPre=/bin/sh -c '\
 MACHINE=$(cat /sys/devices/soc0/machine); \
 if echo "$MACHINE" | grep -q "8797"; then \
-    echo "AR Audio: Nord (sa8797p) detected via machine=$MACHINE, selecting ACDB"; \
-    cp /etc/gen5/sa8797p/acdb_cal.acdb /etc/acdbdata/acdb_cal.acdb; \
-    cp /etc/gen5/sa8797p/workspaceFile.qwsp /etc/acdbdata/workspaceFile.qwsp; \
-    cp /etc/gen5/sa8797p/delta/acdb_cal.acdbdelta /etc/acdbdata/delta/acdb_cal.acdbdelta; \
+    SOC=sa8797p; \
+    echo "AR Audio: Nord (sa8797p) via machine=$MACHINE"; \
 elif echo "$MACHINE" | grep -q "8787"; then \
-    echo "AR Audio: Seca (sa8787) detected via machine=$MACHINE, selecting ACDB"; \
-    cp /etc/gen5/sa8787/acdb_cal.acdb /etc/acdbdata/acdb_cal.acdb; \
-    cp /etc/gen5/sa8787/workspaceFile.qwsp /etc/acdbdata/workspaceFile.qwsp; \
-    cp /etc/gen5/sa8787/delta/acdb_cal.acdbdelta /etc/acdbdata/delta/acdb_cal.acdbdelta; \
+    SOC=sa8787; \
+    echo "AR Audio: Seca (sa8787) via machine=$MACHINE"; \
 else \
-    echo "AR Audio: Unknown machine=$MACHINE, ACDB not updated"; \
-fi && \
-mount -o remount,ro /'
-
-# Step 2: Stage AR shared libraries into /usr/lib/ before audio_service starts.
-# libsndparser.so and other AR .so files are required by agm_init during
-# audio_service initialization and must be present before ExecStart runs.
-ExecStartPre=/bin/sh -c 'mount -o remount,rw / && \
-if ls /usr/lib/ar/*.so; then \
-    cp -f /usr/lib/ar/*.so /usr/lib/ && echo "Copied .so files"; \
+    echo "AR Audio: unknown machine=$MACHINE, cannot select ACDB"; \
+    exit 1; \
+fi; \
+GEN5=/etc/gen5/$SOC; \
+ACDB=/etc/acdbdata; \
+FILES="acdb_cal.acdb workspaceFile.qwsp delta/acdb_cal.acdbdelta"; \
+BIND_OK=1; \
+for rel in $FILES; do \
+    if [ ! -e "$GEN5/$rel" ]; then \
+        echo "AR Audio: ACDB source missing: $GEN5/$rel"; \
+        BIND_OK=0; \
+        break; \
+    elif ! mount --bind "$GEN5/$rel" "$ACDB/$rel"; then \
+        echo "AR Audio: mount --bind failed for $ACDB/$rel"; \
+        BIND_OK=0; \
+        break; \
+    fi; \
+done; \
+if [ "$BIND_OK" = "1" ]; then \
+    echo "AR Audio: ACDB bind-mounted (verity-safe) -- files under $GEN5 are effective"; \
 else \
-    echo "/usr/lib/ar/*.so files NOT available on fs..."; \
-fi && \
-mount -o remount,ro /'
+    echo "=== AR Audio: ACDB bind unavailable, falling back to copy ==="; \
+    COPY_OK=1; \
+    if mount -o remount,rw /; then \
+        for rel in $FILES; do \
+            cp "$GEN5/$rel" "$ACDB/$rel" || COPY_OK=0; \
+        done; \
+        mount -o remount,ro /; \
+    else \
+        echo "AR Audio: remount rw failed, ACDB unavailable"; \
+        COPY_OK=0; \
+    fi; \
+    if [ "$COPY_OK" = "1" ]; then \
+        echo "=== AR Audio: ACDB copied from $GEN5 to $ACDB -- files under $ACDB are effective ==="; \
+    else \
+        echo "AR Audio: ACDB setup failed, aborting service start"; \
+        exit 1; \
+    fi; \
+fi'
 
-# Step 3: Condition check — only launch audio_service on AR-capable ADSP variants.
-ExecCondition = /bin/sh -c "if [ \"$(/bin/cat /sys/kernel/debug/qcom_socinfo/adsp/variant)\" = \"nord.adsp.audio_arQ\" ]; then \
-    /bin/echo \"detecting ar, launching ar audio_service\" && exit 0; \
+ExecStartPre=/bin/sh -c '\
+if ls /usr/lib/ar/*.so >/dev/null 2>&1; then \
+    BIND_OK=1; \
+    for f in /usr/lib/ar/*.so; do \
+        name=$(basename "$f"); \
+        if [ ! -e "/usr/lib/$name" ]; then \
+            echo "AR Audio: target /usr/lib/$name missing, bind not possible"; \
+            BIND_OK=0; \
+            break; \
+        fi; \
+        mount --bind "$f" "/usr/lib/$name" || { BIND_OK=0; break; }; \
+    done; \
+    if [ "$BIND_OK" = "1" ]; then \
+        echo "AR Audio: .so bind-mounted (verity-safe) -- files under /usr/lib/ar/ are effective"; \
+    else \
+        echo "=== AR Audio: .so bind unavailable, falling back to copy ==="; \
+        if mount -o remount,rw /; then \
+            cp -f /usr/lib/ar/*.so /usr/lib/ && \
+                echo "=== AR Audio: .so copied from /usr/lib/ar/ to /usr/lib/ -- files under /usr/lib/ are effective ==="; \
+            mount -o remount,ro /; \
+        else \
+            echo "AR Audio: remount rw failed, cannot stage .so files, aborting"; \
+            exit 1; \
+        fi; \
+    fi; \
 else \
-    /bin/echo \"detecting non-ar, skip launching; adsp variant: \
-    $(/bin/cat /sys/kernel/debug/qcom_socinfo/adsp/variant)\" && exit 1; \
-fi"
+    echo "AR Audio: /usr/lib/ar/*.so not found, aborting service start"; \
+    exit 1; \
+fi'
 
-# Step 4: Launch the AR audio service binary.
 ExecStart=/usr/bin/audio_service
 ExecStartPost=-/usr/bin/timeout 5 /usr/bin/a2bplus_app a2b1.0 /etc/audio_a2bplus
 ExecStartPost=-/usr/bin/timeout 5 /usr/bin/a2bplus_app a2b2.0 /etc/audio_a2bplus
