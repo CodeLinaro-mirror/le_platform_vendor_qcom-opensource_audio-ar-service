@@ -17,20 +17,51 @@ Before=shutdown.target
 LimitMSGQUEUE=infinity
 BusName=org.Qti.AgmService
 SystemdService=dbus-org.Qti.AgmService.service
-ExecCondition = /bin/sh -c "if [ \"$(/bin/cat /sys/kernel/debug/qcom_socinfo/adsp/variant)\" = \"nord.adsp.audio_arQ\" ]; then \
-    /bin/echo \"detecting ar, launching ar audio_service\" && exit 0; \
+
+# Step 1: Select ACDB calibration files based on SoC machine string before audio_service starts.
+# /sys/devices/soc0/machine contains e.g. "QAM8797P" or "QAM8787P".
+# Substring "8797" -> sa8797p (Nord), substring "8787" -> sa8787 (Seca).
+# Files are staged under /etc/gen5/<soc>/ at image build time and
+# copied to /etc/acdbdata/ here so that AGM (graph_init) loads the correct set.
+ExecStartPre=/bin/sh -c 'mount -o remount,rw / && \
+MACHINE=$(cat /sys/devices/soc0/machine); \
+if echo "$MACHINE" | grep -q "8797"; then \
+    echo "AR Audio: Nord (sa8797p) detected via machine=$MACHINE, selecting ACDB"; \
+    cp /etc/gen5/sa8797p/acdb_cal.acdb /etc/acdbdata/acdb_cal.acdb; \
+    cp /etc/gen5/sa8797p/workspaceFile.qwsp /etc/acdbdata/workspaceFile.qwsp; \
+    cp /etc/gen5/sa8797p/delta/acdb_cal.acdbdelta /etc/acdbdata/delta/acdb_cal.acdbdelta; \
+elif echo "$MACHINE" | grep -q "8787"; then \
+    echo "AR Audio: Seca (sa8787) detected via machine=$MACHINE, selecting ACDB"; \
+    cp /etc/gen5/sa8787/acdb_cal.acdb /etc/acdbdata/acdb_cal.acdb; \
+    cp /etc/gen5/sa8787/workspaceFile.qwsp /etc/acdbdata/workspaceFile.qwsp; \
+    cp /etc/gen5/sa8787/delta/acdb_cal.acdbdelta /etc/acdbdata/delta/acdb_cal.acdbdelta; \
 else \
-    /bin/echo \"detecting non-ar, skip launching; adsp variant: \
-    $(/bin/cat /sys/kernel/debug/qcom_socinfo/adsp/variant)\" && exit 1; \
-fi"
-ExecStart = /usr/bin/audio_service
-ExecStartPost=/bin/sh -c 'mount -o remount,rw / && \
+    echo "AR Audio: Unknown machine=$MACHINE, ACDB not updated"; \
+fi && \
+mount -o remount,ro /'
+
+# Step 2: Stage AR shared libraries into /usr/lib/ before audio_service starts.
+# libsndparser.so and other AR .so files are required by agm_init during
+# audio_service initialization and must be present before ExecStart runs.
+ExecStartPre=/bin/sh -c 'mount -o remount,rw / && \
 if ls /usr/lib/ar/*.so; then \
     cp -f /usr/lib/ar/*.so /usr/lib/ && echo "Copied .so files"; \
 else \
     echo "/usr/lib/ar/*.so files NOT available on fs..."; \
 fi && \
 mount -o remount,ro /'
+
+# Step 3: Condition check — only launch audio_service on AR-capable ADSP variants.
+ExecCondition = /bin/sh -c "if [ \"$(/bin/cat /sys/kernel/debug/qcom_socinfo/adsp/variant)\" = \"nord.adsp.audio_arQ\" ]; then \
+    /bin/echo \"detecting ar, launching ar audio_service\" && exit 0; \
+else \
+    /bin/echo \"detecting non-ar, skip launching; adsp variant: \
+    $(/bin/cat /sys/kernel/debug/qcom_socinfo/adsp/variant)\" && exit 1; \
+fi"
+
+# Step 4: Launch the AR audio service binary.
+ExecStart = /usr/bin/audio_service
+
 Type=dbus
 
 [Install]

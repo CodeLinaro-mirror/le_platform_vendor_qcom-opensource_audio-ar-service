@@ -197,7 +197,7 @@ static int32_t ar_prm_clk_enable_v2(struct ar_clk_config *clks)
     int32_t i;
 
     AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "Enter: ar_prm_clk_enable_v2");
-    //csd2_mutex_lock(csd2_prm_ctx.lock);
+
     payload_size = sizeof(struct ar_prm_header) + sizeof(audio_hw_clk_cfg_req_param_t) + clks->num_clks * sizeof(audio_hw_clk_cfg_v2_t);
     rc = ar_prm_alloc_packet(payload_size, &payload);
 
@@ -238,14 +238,18 @@ static int32_t ar_prm_clk_enable_v2(struct ar_clk_config *clks)
     AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "clk_v2 req:counter_n_value %d", clk_enable[0].counter_n_value);
     AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "clk_v2 req:d_value %d", clk_enable[0].d_value);
 
+    rc = gsl_hw_rsc_init();
+    if (rc)
+        AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "Failed to init gsl_hw_rsc, rc: %d", rc);
+
     rc = gsl_request_hw_rsc_custom_config(payload, payload_size, buff, &buff_size);
     if (rc)
         AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "Failed to request clk_v2!");
 exit:
     if (payload)
         ar_mem_free(payload);
-   // csd2_mutex_unlock(csd2_prm_ctx.lock);
-    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "Exit: ar_prm_clk_enable_v2");
+
+    AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE, "Exit, rc: %d\n", rc);
     return rc;
 }
 

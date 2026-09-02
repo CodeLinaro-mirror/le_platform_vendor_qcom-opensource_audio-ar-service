@@ -1,0 +1,35 @@
+/*
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
+PCM Logging Utility
+
+Usage:
+pcm_logging_util -g gkv -t tag [-m 0|1] [-c channel_cfg] [-v 1|2]
+
+c: channel config
+        V1 (-v 1): channel bitmask (ex: 0xFFFFFFAA)
+        V2 (default): range "(min,max)", sparse list "{ch1,ch2,...}",
+                       or mask words "0xW0[,0xW1,0xW2,0xW3]"
+                        - W0 controls channels 1..32
+                        - W1 controls channels 33..64
+                        - W2 controls channels 65..96
+                        - W3 controls channels 97..128
+g: gkv: ((k1,v1),(k2,v2),(k3,v3),(k4,v4))
+        spf pcm logging configuration (required)
+h: usage
+m: module enable control (0: disable, 1: enable)
+t: tag ID for data logging module (Ex: tag ID 0xC00000F7 corresponds to 0x1586 data logging module)
+        tag ID can be found from tools -> discovery wizard -> view/edit definitions -> Module tags
+v: By default v represents version 2, set v to 1 for backward compatibility
+        Provide at least one of -m or -c
+
+Usage Example:
+    pcm_logging_util -g "((0xa1000000,0xa1000001),(0xab000000,0x1),(0xff000000,0x0),(0xac000000,0xac000002),(0xa2000000,0xa200000b))" -t 0xC00000F7 -m 0
+    pcm_logging_util -g "((0xa1000000,0xa1000001),(0xab000000,0x1),(0xff000000,0x0),(0xac000000,0xac000002),(0xa2000000,0xa200000b))" -t 0xC00000F7 -m 1
+    pcm_logging_util -g "((0xa1000000,0xa1000001),(0xab000000,0x1),(0xff000000,0x0),(0xac000000,0xac000002),(0xa2000000,0xa200000b))" -t 0xC00000F7 -c "(0x18,0x24)"
+    pcm_logging_util -g "((0xa1000000,0xa1000001),(0xab000000,0x1),(0xff000000,0x0),(0xac000000,0xac000002),(0xa2000000,0xa200000b))" -t 0xC00000F7 -c "{0x1,0x3,0x6}"
+    pcm_logging_util -g "((0xa1000000,0xa1000001),(0xab000000,0x1),(0xff000000,0x0),(0xac000000,0xac000002),(0xa2000000,0xa200000b))" -t 0xC00000F7 -c "0x0000002D"
+    pcm_logging_util -g "((0xa1000000,0xa1000001),(0xab000000,0x1),(0xff000000,0x0),(0xac000000,0xac000002),(0xa2000000,0xa200000b))" -t 0xC00000F7 -c "0x0000002D,0x0,0x0,0x0"
+    pcm_logging_util -v 1 -g "((0xa1000000,0xa1000001),(0xab000000,0x1),(0xff000000,0x0),(0xac000000,0xac000002),(0xa2000000,0xa200000b))" -t 0xC00000F7 -c 0xFFFFFFAA
