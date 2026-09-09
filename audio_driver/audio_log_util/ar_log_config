@@ -1,0 +1,17 @@
+# AR audio-log-util configuration.
+# Bit mask: CRITICAL=0x1 ERROR=0x2 INFO=0x4 DEBUG=0x8 VERBOSE=0x10.
+# Changes take effect when the AR audio-log-util library is loaded.
+1 update_log_lvl AUDIO-SERVICE 0x7
+1 update_log_lvl VIO-AUD-DEV 0x7
+1 update_log_lvl AGM-CORE 0x7
+1 update_log_lvl AGM-IPC-CLIENT 0x7
+1 update_log_lvl AGM-IPC-SERVER 0x7
+1 update_log_lvl AGM-TINYALSA-PLUGIN 0x7
+1 update_log_lvl AGM-ALSALIB-PLUGIN 0x7
+1 update_log_lvl ARGS-OSAL 0x7
+1 update_log_lvl ARGS-UTIL 0x7
+1 update_log_lvl ARGS-GPR 0x7
+1 update_log_lvl ARGS-GSL 0x7
+1 update_log_lvl ARGS-ACDB 0x7
+1 update_log_lvl ARGS-ATS 0x7
+1 update_log_lvl ARGS-SPF 0x7
