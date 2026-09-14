@@ -31,7 +31,8 @@
 #define AR_LOGE(...) AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AR_DEV_PLUGIN, __VA_ARGS__)
 #define AR_LOGI(...) AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AR_DEV_PLUGIN, __VA_ARGS__)
 #define AR_LOGD(...) AUDIO_BASE_LOG(BASE_LOG_DEBUG, MODULE_AR_DEV_PLUGIN, __VA_ARGS__)
-
+#define DAC_RETRY_MAX              500
+#define AR_DEV_INIT_TOTAL_STEPS    12
 /******************************************************************************/
 /******************************* GLOBAL VARIABLES *****************************/
 /******************************************************************************/
@@ -50,6 +51,9 @@ int32_t ar_dev_init(void)
 {
     uint32_t rc = 0;
     int32_t step = 0;
+    int32_t retry = 0;
+    uint8_t dac_default_gain = DAC_DEFAULT_GAIN;
+
     audio_expander_init_config_t expander_init_cfg = {
         0,
     };
@@ -82,7 +86,7 @@ int32_t ar_dev_init(void)
        AR_LOGE("ar_scmi_reset_ioctl failed for operation:%u", SCMI_RST_ASSERT);
        goto exit;
     }
-    AR_LOGI("ar scmi gpio assert operation done");
+    AR_LOGI("ar scmi gpio assert operation done [step %d/%d]", step, AR_DEV_INIT_TOTAL_STEPS);
 
     step = 3;
     rc = ar_scmi_reset_ioctl(SCMI_RST_DEASSERT);
@@ -90,7 +94,7 @@ int32_t ar_dev_init(void)
        AR_LOGE("ar_scmi_reset_ioctl failed for operation:%u", SCMI_RST_DEASSERT);
        goto exit;
     }
-    AR_LOGI("ar scmi gpio deassert operation done");
+    AR_LOGI("ar scmi gpio deassert operation done [step %d/%d]", step, AR_DEV_INIT_TOTAL_STEPS);
 
     AR_LOGI("starting audio expander and dac init");
     expander_init_cfg.i2c_device = I2C_DEVICE;
@@ -117,7 +121,7 @@ int32_t ar_dev_init(void)
     if (AUD_EOK != rc)
         goto exit;
 
-    AR_LOGI("audio expander operation done");
+    AR_LOGI("audio expander operation done [step %d/%d]", step, AR_DEV_INIT_TOTAL_STEPS);
 
     step = 8;
     dac_init_cfg.i2c_device = I2C_DEVICE;
@@ -132,21 +136,60 @@ int32_t ar_dev_init(void)
         goto exit;
 
     step = 10;
-    dac_format.format = I2S_TDM;
-    rc = audio_dac_ioctl(dac_handle, CMD_SET_DAC_FMT, &dac_format, sizeof(dac_format));
+    AR_LOGI("audio_dac_ioctl CMD_SET_DAC_GAIN: starting, max_tries=%d, interval=10ms", DAC_RETRY_MAX);
+    {
+        struct timespec ts_start, ts_end;
+        clock_gettime(CLOCK_MONOTONIC, &ts_start);
+        do {
+            ++retry;
+            rc = audio_dac_ioctl(dac_handle, CMD_SET_DAC_GAIN, &dac_default_gain, sizeof(dac_default_gain));
+            if (DAC_EOK == rc)
+                break;
+            /* Need to wait for MCLK to be ready */
+            usleep(10*1000);
+        } while(retry < DAC_RETRY_MAX);
+        clock_gettime(CLOCK_MONOTONIC, &ts_end);
+        long gain_elapsed_ms = (ts_end.tv_sec - ts_start.tv_sec) * 1000 +
+                               (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000;
+        AR_LOGI("audio_dac_ioctl CMD_SET_DAC_GAIN: %s, tries=%d, interval=10ms, total=%ldms",
+                DAC_EOK == rc ? "success" : "failed", retry, gain_elapsed_ms);
+    }
     if (DAC_EOK != rc)
         goto exit;
 
-    AR_LOGI("audio dac operation done");
-
     step = 11;
+    dac_format.format = I2S_TDM;
+    retry = 0;
+    AR_LOGI("audio_dac_ioctl CMD_SET_DAC_FMT: starting, max_tries=%d, interval=10ms", DAC_RETRY_MAX);
+    {
+        struct timespec ts_start, ts_end;
+        clock_gettime(CLOCK_MONOTONIC, &ts_start);
+        do {
+            ++retry;
+            rc = audio_dac_ioctl(dac_handle, CMD_SET_DAC_FMT, &dac_format, sizeof(dac_format));
+            if (DAC_EOK == rc)
+                break;
+            usleep(10*1000);
+        } while(retry < DAC_RETRY_MAX);
+        clock_gettime(CLOCK_MONOTONIC, &ts_end);
+        long fmt_elapsed_ms = (ts_end.tv_sec - ts_start.tv_sec) * 1000 +
+                              (ts_end.tv_nsec - ts_start.tv_nsec) / 1000000;
+        AR_LOGI("audio_dac_ioctl CMD_SET_DAC_FMT: %s, tries=%d, interval=10ms, total=%ldms",
+                DAC_EOK == rc ? "success" : "failed", retry, fmt_elapsed_ms);
+    }
+    if (DAC_EOK != rc)
+        goto exit;
+
+    AR_LOGI("audio dac operation done [step %d/%d]", step, AR_DEV_INIT_TOTAL_STEPS);
+
+    step = 12;
     adc_init_cfg.i2c_device = I2C_DEVICE;
     adc_init_cfg.i2c_addr = I2C_AUDIO_ADC_ADDR;
     rc = audio_adc_init(&adc_init_cfg);
     if (ADC_EOK != rc)
         goto exit;
 
-    AR_LOGI("audio adc operation done");
+    AR_LOGI("audio adc operation done [step %d/%d]", step, AR_DEV_INIT_TOTAL_STEPS);
 
     return AR_EOK;
 
