@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -55,6 +56,7 @@ static void print_usage(void)
     printf("-v , Enable verbose sloging. Disabled by default. Verbosity level increases on specifying extra v.\n");
     printf("-h , Print this usage message.\n");
     printf("-f , Set LPASS config path.\n");
+    printf("<device_id> <device_kv> , Device subgraph ID and key-value (decimal or 0x hex).\n");
     fflush(stdout);
 }
 
@@ -119,6 +121,22 @@ int main(int argc, char** argv)
         }
     }
     mainloop = g_main_loop_new(NULL, false);
+    if ((argc - optind) >= 2) {
+        char *endptr;
+        uint32_t device_id = (uint32_t)strtoul(argv[optind], &endptr, 0);
+        if (*endptr != '\0') {
+            fprintf(stderr, "audio_service: invalid device_id '%s'\n", argv[optind]);
+            if (lpass_config_path) free(lpass_config_path);
+            return EXIT_FAILURE;
+        }
+        uint32_t device_kv = (uint32_t)strtoul(argv[optind + 1], &endptr, 0);
+        if (*endptr != '\0') {
+            fprintf(stderr, "audio_service: invalid device_kv '%s'\n", argv[optind + 1]);
+            if (lpass_config_path) free(lpass_config_path);
+            return EXIT_FAILURE;
+        }
+        audio_service_set_sg_params(device_id, device_kv);
+    }
     if (0 != audio_service_core_init(audio_service_initFlags, lpass_config_path)) {
         AUDIO_BASE_LOG(BASE_LOG_CRITICAL, MODULE_AUDIO_SERVICE, "audio_service: audio_service_core_init Error");
         if (lpass_config_path) {

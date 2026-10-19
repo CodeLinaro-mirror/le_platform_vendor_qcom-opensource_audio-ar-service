@@ -20,7 +20,7 @@ uint32_t ar_scmi_dev_open(void)
         return AR_EFAILED;
     }
 
-    AR_LOGE("AR SCMI node: %s opened successfully with fd :%d", AR_SCMI_NODE, ar_scmi_fd);
+    AR_LOGI("AR SCMI node: %s opened successfully with fd :%d", AR_SCMI_NODE, ar_scmi_fd);
     return AR_EOK;
 }
 
@@ -42,7 +42,7 @@ uint32_t ar_scmi_reset_ioctl(scmi_rst_oper_t oper)
         return AR_EFAILED;
     }
 
-    AR_LOGE("AR SCMI Reset ioctl operation: %u is successfull for: %s with fd:%d", oper, AR_SCMI_NODE, ar_scmi_fd);
+    AR_LOGI("AR SCMI Reset ioctl operation: %u is successfull for: %s with fd:%d", oper, AR_SCMI_NODE, ar_scmi_fd);
     return AR_EOK;
 }
 #else
@@ -63,7 +63,7 @@ uint32_t ar_scmi_reset_ioctl(scmi_rst_oper_t oper)
         return AR_EFAILED;
     }
 
-    AR_LOGE("AR SCMI Reset ioctl operation: %u is successfull for: %s with fd:%d", oper, AR_SCMI_NODE, ar_scmi_fd);
+    AR_LOGI("AR SCMI Reset ioctl operation: %u is successfull for: %s with fd:%d", oper, AR_SCMI_NODE, ar_scmi_fd);
     return AR_EOK;
 }
 #endif

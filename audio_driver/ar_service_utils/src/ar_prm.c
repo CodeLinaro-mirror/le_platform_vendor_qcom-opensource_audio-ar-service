@@ -242,7 +242,16 @@ static int32_t ar_prm_clk_enable_v2(struct ar_clk_config *clks)
     if (rc)
         AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "Failed to init gsl_hw_rsc, rc: %d", rc);
 
-    rc = gsl_request_hw_rsc_custom_config(payload, payload_size, buff, &buff_size);
+    /* AR_ENOTREADY (10): DSP HW-RSC channel may not be ready immediately after
+     * SSR. Retry up to 5 times with a 50 ms gap (250 ms total budget). */
+    for (int retries = 0; retries < 5; retries++) {
+        rc = gsl_request_hw_rsc_custom_config(payload, payload_size, buff, &buff_size);
+        if (rc != 10)
+            break;
+        AUDIO_BASE_LOG(BASE_LOG_INFO, MODULE_AUDIO_SERVICE,
+            "gsl_request_hw_rsc_custom_config busy (rc=10), retry %d/5", retries + 1);
+        usleep(50000);
+    }
     if (rc)
         AUDIO_BASE_LOG(BASE_LOG_ERROR, MODULE_AUDIO_SERVICE, "Failed to request clk_v2!");
 exit:

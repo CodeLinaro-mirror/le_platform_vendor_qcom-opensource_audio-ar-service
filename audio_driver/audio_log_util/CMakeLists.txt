@@ -12,6 +12,7 @@ set(audio_log_util_SOURCE
 
 add_library(audio_log_util SHARED ${audio_log_util_SOURCE})
 target_link_libraries(audio_log_util PUBLIC glib-2.0)
+set_target_properties(audio_log_util PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 
 install(TARGETS audio_log_util LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 install(DIRECTORY ${audio_log_util_includes} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
